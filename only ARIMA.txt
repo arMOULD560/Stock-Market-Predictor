@@ -1,0 +1,105 @@
+import yfinance as yf
+import pandas as pd
+from statsmodels.tsa.arima.model import ARIMA
+import pmdarima as pm
+import matplotlib.pyplot as plt
+from pandas.tseries.offsets import BDay
+
+# === User Input ===
+ticker_base = input("Enter NSE stock symbol (example: RELIANCE): ").strip().upper()
+if not ticker_base.endswith('.NS'):
+    ticker = ticker_base + '.NS'
+else:
+    ticker = ticker_base
+
+purchase_date = input("Enter Date of Purchase (YYYY-MM-DD): ")
+future_date = input("Enter Future Date to Predict Price (YYYY-MM-DD): ")
+
+# === Get stock listing date dynamically ===
+ticker_obj = yf.Ticker(ticker)
+hist = ticker_obj.history(period="max")
+if hist.empty:
+    print(f"❌ No historical data found for {ticker}. Check symbol and try again.")
+    exit()
+listing_date = hist.index.min().date()
+
+print(f"Detected listing date for {ticker}: {listing_date}")
+
+# === Download stock data from listing date ===
+data = yf.download(ticker, start=listing_date)
+series = data['Close'].dropna()
+series.index = pd.DatetimeIndex(series.index)
+series = series.asfreq('B')               # Force business day frequency
+series = series.fillna(method='ffill')    # Forward fill missing days
+today = series.index[-1]
+
+# === Adjust purchase date to nearest trading day ===
+purchase_date = pd.to_datetime(purchase_date)
+while purchase_date.strftime("%Y-%m-%d") not in series.index.strftime("%Y-%m-%d"):
+    purchase_date += BDay(1)
+purchase_date_str = purchase_date.strftime("%Y-%m-%d")
+purchase_price = float(series.loc[purchase_date_str])
+
+# === Adjust future date to next trading day if needed ===
+future_date = pd.to_datetime(future_date)
+if future_date <= today:
+    print("❌ Future date must be greater than latest available stock date.")
+    exit()
+while future_date.weekday() >= 5:
+    future_date += BDay(1)
+
+# === Limit forecast horizon to max 60 business days ===
+max_days = 180
+end_forecast_date = min(today + BDay(max_days), future_date)
+forecast_index = pd.bdate_range(today + BDay(1), end_forecast_date)
+days_to_forecast = len(forecast_index)
+
+if days_to_forecast == 0:
+    print("❌ Forecast date too close or no business days between today and future date.")
+    exit()
+
+# === Build and fit ARIMA Model ===
+model = pm.auto_arima(series, seasonal=False, stepwise=True, suppress_warnings=True)
+arima_model = ARIMA(series, order=model.order)
+arima_fit = arima_model.fit()
+
+# === Forecast prices ===
+forecast = arima_fit.forecast(steps=days_to_forecast)
+forecast_series = pd.Series(forecast, index=forecast_index)
+future_target_date = forecast_index[-1]
+future_price = float(forecast_series.iloc[-1])
+
+if pd.isna(future_price):
+    print("❌ Forecast failed. Try a closer future date or more historical data.")
+    exit()
+
+purchase_price = float(series.loc[purchase_date_str])
+latest_price = float(series.iloc[-1])
+future_price = float(forecast_series.iloc[-1])
+
+# Calculate profit/loss from purchase to future date
+profit_loss_purchase_to_future = future_price - purchase_price
+
+# === Print Summary ===
+print(f"\n--- Price Summary for {ticker} ---")
+print(f"Purchase Date (Adjusted): {purchase_date_str}, Price: ₹{purchase_price:.2f}")
+print(f"Latest Date: {today.date()}, Price: ₹{latest_price:.2f}")
+print(f"Profit/Loss (Purchase → Today): ₹{latest_price - purchase_price:.2f}")
+print(f"Future Date (Adjusted): {future_target_date.date()}, Predicted Price: ₹{future_price:.2f}")
+print(f"Profit/Loss (Today → Future): ₹{future_price - latest_price:.2f}")
+print(f"Profit/Loss (Purchase → Future): ₹{profit_loss_purchase_to_future:.2f}")
+
+# === Plotting ===
+plt.figure(figsize=(14,7))
+plt.plot(series.index, series, label='Historical Price', color='blue')
+plt.plot(forecast_series.index, forecast_series, label='Forecasted Price', color='red', linestyle='--')
+plt.scatter([pd.to_datetime(purchase_date_str)], [purchase_price], color='green', s=80, label='Purchase Price', zorder=5)
+plt.scatter([today], [latest_price], color='blue', s=80, label='Latest Price', zorder=5)
+plt.scatter([future_target_date], [future_price], color='red', s=80, label='Future Predicted Price', zorder=5)
+plt.title(f"{ticker} Stock Price Forecast")
+plt.xlabel('Date')
+plt.ylabel('Price (INR)')
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
