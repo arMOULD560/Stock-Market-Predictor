@@ -282,15 +282,11 @@ Profit/Loss (Purchase → Future): ₹800.00
 
 ## 👨‍💻 Contributors
 
-- **Developer:** [Your Name]
+- **Developer:** Ayush Lohia
 - **Project:** Stock Market Predictor (Academic/Professional Project)
 - **Last Updated:** November 2025
 
 ---
-
-## 📄 License
-
-This project is open-source and available under the MIT License. See `LICENSE` file for details.
 
 ---
 
